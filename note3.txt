@@ -1,0 +1,24 @@
+//---------deployment------------//
+
+build ve node_modules  ı client ve server dan sil
+
+server tarafta
+package.json a ekle
+
+
+
+"scripts":{
+  "setup-production":"npm run install-client && npm run build-client && npm install",
+  "install-client":"cd client && npm install",
+}
+
+
+
+server da terminale yaz
+PS C:\Users\murat\OneDrive\Masaüstü\mern_stack_jobify> npm run setup-production
+
+PS C:\Users\murat\OneDrive\Masaüstü\mern_stack_jobify> node server
+
+
+artık server ==> Server is listening on port 5000...
+client  http://localhost:5000/   de çalışıcak (3000 değil)

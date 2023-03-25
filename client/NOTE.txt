@@ -1,0 +1,12 @@
+install normalize.css
+
+PS D:\2.mern-course-jobify-jhonsmilga\jobify-start\client> npm install normalize.css
+
+and import index.js 
+
+import 'normalize.css'
+
+
+
+- Coding Addict - [Default Starter Video](https://youtu.be/UDdyGNlQK5w)
+- Repo - [Default Starter Repo](https://github.com/john-smilga/default-starter)

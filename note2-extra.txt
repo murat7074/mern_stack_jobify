@@ -1,0 +1,936 @@
+Bu projede extra olarak 
+----------------------------------------------------------------------------------------------
+"debounce" (request i geciktiricez (user tam olarak search e yazmayı bıraktıktan sonra request yapıcaz))
+"test user olacak"
+"auth with cookies"
+
+// debounce logic //
+
+  const debounce = () => {
+    let timeoutID;
+    return () => {
+      console.log(timeoutID);
+      clearTimeout(timeoutID);
+      timeoutID = setTimeout(() => {
+            console.log("you clicked me"); // burası son click den 2 saniye sonra 1 kere çalışacak
+      }, 2000);
+    };
+  };
+
+  btn.addEventListener("click",debounce(()=>{
+ 
+  }))
+// end of debounce logic //
+
+
+
+####  Search with Debounce
+// react de vanilla js den farklı olarak useMemo yu kullanmalıyız
+// react de debounce için useMemo yu kullanmalıyız. Çünkü useMemo 1 kez çalışır
+// const optimizedDebounce = useMemo(()=>debounce(),[])
+
+client/components/SearchContainer.js
+
+```js
+
+import { useState, useMemo } from 'react';
+const SearchContainer = () => {
+  const [localSearch, setLocalSearch] = useState('');
+  const {
+    ....
+  } = useAppContext();
+  const handleSearch = (e) => {
+    handleChange({ name: e.target.name, value: e.target.value });
+  };
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    clearFilters();
+  };
+  const debounce = () => {
+    let timeoutID;
+    return (e) => {
+      setLocalSearch(e.target.value);
+      clearTimeout(timeoutID);
+      timeoutID = setTimeout(() => {
+        handleChange({ name: e.target.name, value: e.target.value });
+      }, 1000);
+    };
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    setLocalSearch('');
+    clearFilters();
+  };
+
+  const optimizedDebounce = useMemo(() => debounce(), []);
+  return (
+    <Wrapper>
+      <form className='form'>
+        <h4>search form</h4>
+        <div className='form-center'>
+          {/* search position */}
+
+          <FormRow
+            type='text'
+            name='search'
+            value={localSearch}
+            handleChange={optimizedDebounce}
+          />
+         ........
+        </div>
+      </form>
+    </Wrapper>
+  );
+};
+
+export default SearchContainer;
+```
+
+
+// TEST USER //
+create test user with register
+
+
+_id:6416ffc24441d1bc9852bd4c
+name:test user
+email:testUser@test.com
+password:secret
+_id:6416ffc24441d1bc9852bd4c  // mongodb id
+
+id yi mock-data.json da jobsların createdBy ın içine kopyala ve
+server tarafta terminale ==>>  node populate            yaz
+
+
+client de register.js de  button oluşturalım
+
+ <button
+          type="button"
+          className="btn btn-block btn-hipster"
+          disabled={isLoading}
+          onClick={() => {
+            setupUser({
+              currentUser: { email: 'testUser@test.com', password: 'secret' },
+              endPoint: 'login',
+              alertText: 'Login Successful! Redirecting...',
+            });
+          }}
+        >
+          {isLoading ? 'loading...' : 'demo app'}
+        </button>
+
+
+// restrict test user //
+
+#### Test User - Restrict Access (server)
+
+- check for test user in auth middleware
+- create new property on user object (true/false)
+- create new middleware (testUser)
+- check for test user, if true send back BadRequest Error
+- add testUser middleware in front of routes you want to restrict access to
+- fix the frontend  (test user jobs silmeye çalıştığında logout olmasın)
+
+
+middleware/auth.js
+
+```js
+import jwt from 'jsonwebtoken';
+import { UnAuthenticatedError } from '../errors/index.js';
+
+UnAuthenticatedError;
+const auth = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer')) {
+    throw new UnAuthenticatedError('Authentication Invalid');
+  }
+  const token = authHeader.split(' ')[1];
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    // TEST USER
+    const testUser = payload.userId === 'testUserID';
+    req.user = { userId: payload.userId, testUser };
+    // TEST USER
+    next();
+  } catch (error) {
+    throw new UnAuthenticatedError('Authentication Invalid');
+  }
+};
+
+export default auth;
+```
+
+middleware/testUser
+
+```js
+import { BadRequestError } from '../errors/index.js';
+
+const testUser = (req, res, next) => {
+  if (req.user.testUser) {
+    throw new BadRequestError('Test User. Read Only!');
+  }
+  next();
+};
+
+export default testUser;
+```
+
+routes/jobsRoutes
+
+```js
+import express from 'express';
+const router = express.Router();
+
+import {
+  createJob,
+  deleteJob,
+  getAllJobs,
+  updateJob,
+  showStats,
+} from '../controllers/jobsController.js';
+
+import testUser from '../middleware/testUser.js';
+
+router.route('/').post(testUser, createJob).get(getAllJobs);
+// remember about :id
+router.route('/stats').get(showStats);
+router.route('/:id').delete(testUser, deleteJob).patch(testUser, updateJob);
+
+export default router;
+```
+
+routes/authRoutes
+
+```js
+import express from 'express';
+const router = express.Router();
+
+import rateLimiter from 'express-rate-limit';
+const apiLimiter = rateLimiter({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  message: 'Too many requests from this IP, please try again after 15 minutes',
+});
+
+import { register, login, updateUser } from '../controllers/authController.js';
+import authenticateUser from '../middleware/auth.js';
+import testUser from '../middleware/testUser.js';
+router.route('/register').post(apiLimiter, register);
+router.route('/login').post(apiLimiter, login);
+router.route('/updateUser').patch(authenticateUser, testUser, updateUser);
+
+export default router;
+
+
+// fix the backend //
+appContext.js de
+// comment logoutUser() and add iff block 
+// add action  "DELETE_JOB_ERROR"
+// add alert in jobsContainer.js
+
+ if (error.response.status === 401) return;
+      dispatch({
+        type: EDIT_JOB_ERROR,
+        payload: { msg: error.response.data.msg },
+      });
+
+
+
+  //--- DELETE  JOB---- //
+  const deleteJob = async (jobId) => {
+    // console.log(`delete job : ${jobId}`);
+    dispatch({ type: DELETE_JOB_BEGİN });
+    try {
+      await authFetch.delete(`/jobs/${jobId}`);
+      getJobs(); // silinenlerden sonra güncel jobs ları getirelim
+    } catch (error) {
+       if (error.response.status === 401) return;
+      dispatch({
+        type: EDIT_JOB_ERROR,
+        payload: { msg: error.response.data.msg },
+      });
+      // logoutUser()
+    }
+  };
+
+
+
+//------------------------COOKIES----(more secure than storing data in localStorage)----------------------//
+
+
+#### Store JWT in Cookie
+
+- BE PREPARED TO REFACTOR CODE !!!
+- PLEASE DON'T RUSH THROUGH THESES VIDEOS
+- CHECK FEW TIMES BEFORE REMOVING/ADDING CODE
+- Two sides must work on the same domain (http:localhost:5000) gibi
+
+-npm install cookie-parser   and import in server.js
+
+#### Attach Cookies to Login response
+
+controllers/authController.js
+
+```js
+// login controller
+
+const token = user.createJWT();
+
+const oneDay = 1000 * 60 * 60 * 24;
+
+res.cookie('token', token, {
+  httpOnly: true,
+  expires: new Date(Date.now() + oneDay),
+  secure: process.env.NODE_ENV === 'production',
+});
+```
+
+#### Setup Function in Utils
+
+- create attachCookies.js
+
+```js
+const attachCookie = ({ res, token }) => {
+  const oneDay = 1000 * 60 * 60 * 24;
+
+  res.cookie('token', token, {
+    httpOnly: true,
+    expires: new Date(Date.now() + oneDay),
+    secure: process.env.NODE_ENV === 'production',
+  });
+};
+
+export default attachCookie;
+```
+
+- import in authController.js
+- invoke in register/login/updateUser
+
+```js
+import attachCookie from '../utils/attachCookie.js';
+
+attachCookie({ res, token });
+```
+
+#### Parse Cookie Coming Back from the Front-End
+
+- install cookie-parser (server)
+
+```sh
+npm install cookie-parser
+```
+
+server.js
+
+```js
+import cookieParser from 'cookie-parser';
+
+app.use(express.json());
+app.use(cookieParser());
+```
+
+middleware/auth.js
+
+```js
+const auth = async (req, res, next) => {
+  console.log(req.cookies)
+  ....
+}
+```
+
+#### Refactor Auth Middleware
+
+middleware/auth.js
+
+```js
+const auth = async (req, res, next) => {
+  const token = req.cookies.token;
+  if (!token) {
+    throw new UnAuthenticatedError('Authentication Invalid');
+  }
+  // rest of the code
+};
+```
+
+#### SERVER - Remove Token from JSON Response
+
+controllers/authController
+
+register/login/updateUser
+
+```js
+res.status(StatusCodes.OK).json({ user, location: user.location });
+```
+
+- test the APP
+
+#### FRONT-END Remove Token from CONTEXT
+
+- PLEASE BE CAREFUL WHEN MAKING THESE UPDATES
+  client/context/appContext
+
+- remove
+
+```js
+const token = localStorage.getItem('token');
+const user = localStorage.getItem('user');
+const userLocation = localStorage.getItem('location');
+```
+
+- fix initial state
+
+```js
+const initialState = {
+  // remove token all together
+  user: null,
+  userLocation: '',
+  jobLocation: '',
+};
+```
+
+- remove request interceptor
+
+```js
+authFetch.interceptors.request.use(
+  (config) => {
+    config.headers.common['Authorization'] = `Bearer ${state.token}`;
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+```
+
+- remove both addToLocalStorage and removeFromLocalStorage functions
+- remove from setupUser and updateUser (token and local storage functions)
+- remove from the reducer token (COMMAND + F)
+
+```js
+const logoutUser = async () => {
+  dispatch({ type: LOGOUT_USER });
+  // remove local storage code
+};
+```
+
+#### Test Expiration
+
+```js
+expires: new Date(Date.now() + 5000),
+```
+
+#### GET Current User Route
+
+controllers/authController.js
+
+```js
+const getCurrentUser = async (req, res) => {
+  const user = await User.findOne({ _id: req.user.userId });
+  res.status(StatusCodes.OK).json({ user, location: user.location });
+};
+
+export { register, login, updateUser, getCurrentUser };
+```
+
+routes/authRoutes.js
+
+```js
+import {
+  register,
+  login,
+  updateUser,
+  getCurrentUser,
+} from '../controllers/authController.js';
+
+router.route('/register').post(apiLimiter, register);
+router.route('/login').post(apiLimiter, login);
+router.route('/updateUser').patch(authenticateUser, testUser, updateUser);
+router.route('/getCurrentUser').get(authenticateUser, getCurrentUser);
+```
+
+#### GET Current User - Front-End
+
+actions.js
+
+```js
+export const GET_CURRENT_USER_BEGIN = 'GET_CURRENT_USER_BEGIN';
+export const GET_CURRENT_USER_SUCCESS = 'GET_CURRENT_USER_SUCCESS';
+```
+
+- setup imports (appContext and reducer)
+
+#### GET Current User Request
+
+- first set the state value (default TRUE !!!)
+  appContext.js
+
+```js
+const initialState = {
+  userLoading: true,
+};
+
+const getCurrentUser = async () => {
+  dispatch({ type: GET_CURRENT_USER_BEGIN });
+  try {
+    const { data } = await authFetch('/auth/getCurrentUser');
+    const { user, location } = data;
+
+    dispatch({
+      type: GET_CURRENT_USER_SUCCESS,
+      payload: { user, location },
+    });
+  } catch (error) {
+    if (error.response.status === 401) return;
+    logoutUser();
+  }
+};
+useEffect(() => {
+  getCurrentUser();
+}, []);
+```
+
+reducer.js
+
+```js
+if (action.type === GET_CURRENT_USER_BEGIN) {
+  return { ...state, userLoading: true, showAlert: false };
+}
+if (action.type === GET_CURRENT_USER_SUCCESS) {
+  return {
+    ...state,
+    userLoading: false,
+    user: action.payload.user,
+    userLocation: action.payload.location,
+    jobLocation: action.payload.location,
+  };
+}
+```
+
+```js
+if (action.type === LOGOUT_USER) {
+  return {
+    ...initialState,
+    userLoading: false,
+  };
+}
+```
+
+#### Protected Route FIX
+
+```js
+import Loading from '../components/Loading';
+
+const ProtectedRoute = ({ children }) => {
+  const { user, userLoading } = useAppContext();
+
+  if (userLoading) return <Loading />;
+
+  if (!user) {
+    return <Navigate to='/landing' />;
+  }
+  return children;
+};
+
+export default ProtectedRoute;
+```
+
+#### Landing Page
+
+```js
+import { Navigate } from 'react-router-dom';
+import { useAppContext } from '../context/appContext';
+
+const Landing = () => {
+  const { user } = useAppContext();
+  return (
+    <React.Fragment>
+      {user && <Navigate to='/' />}
+      <Wrapper>// rest of the code..........</Wrapper>
+    </React.Fragment>
+  );
+};
+
+export default Landing;
+```
+
+#### Logout Route
+
+controllers/authController
+
+```js
+const logout = async (req, res) => {
+  res.cookie('token', 'logout', {
+    httpOnly: true,
+    expires: new Date(Date.now() + 1000),
+  });
+  res.status(StatusCodes.OK).json({ msg: 'user logged out!' });
+};
+```
+
+routes/authRoutes
+
+```js
+import {
+  register,
+  login,
+  updateUser,
+  getCurrentUser,
+  logout,
+} from '../controllers/authController.js';
+
+router.route('/register').post(apiLimiter, register);
+router.route('/login').post(apiLimiter, login);
+router.get('/logout', logout);
+// rest of the code ....
+```
+
+#### Logout - Front-End
+
+appContext.js
+
+```js
+const logoutUser = async () => {
+  await authFetch.get('/auth/logout');
+  dispatch({ type: LOGOUT_USER });
+};
+```
+
+#### Prepare for Deployment
+
+- in client remove build and node_modules
+- in server remove node_modules
+
+package.json
+
+```json
+
+"scripts":{
+  "setup-production":"npm run install-client && npm run build-client && npm install",
+  "install-client":"cd client && npm install",
+}
+
+
+
+
+
+
+//-----------------------------------------------------------------------------------------------------------------//
+// BAŞLANGIÇ//
+server için 
+jobify-start da terminal aç   npm init -y
+server.js oluştur  
+terminale node server yazınca server.js deki log u görmen lazım
+
+
+    import methods
+// ----common js--------//
+const express = require("express")
+const app = express()
+
+// ----es6 --------//
+import express from "express"
+const app = express()
+
+es6 import için package.js de "main" altına   "type":"module", yaz
+ "main": "index.js",
+  "type":"module",
+
+
+nodemon u kur
+npm install nodemon --save-dev
+
+
+express i kuralım
+npm install express
+
+
+env. kuralım
+npm install dotenv
+
+
+mongoose kuralım
+npm install mongoose
+
+
+email doğrulaması için validator kur (https://www.npmjs.com/package/validator) ve User.js de import et
+npm install validator
+
+
+hataları yakalamak için try catch yerine "express-async-errors" kurabiliriz ve server.js de üst tarafa import et
+npm install express-async-errors --save
+
+import "express-async-errors"      server.js de
+
+
+ http-status-codes  kuralım  authController.js ve error-handler.js de import edelim
+npm install http-status-codes
+import {StatusCodes} from "http-status-codes"
+
+passwordu kriptolayarak mongodb ye atıcaz, bcryptjs kuralım ve User model e import edelim
+npm install bcryptjs
+import bcrypt from "bcryptjs"
+
+
+jsonwebtoken kuralım ve User model e import edelim
+npm install jsonwebtoken
+
+
+
+//---------------- CONNECT BOTH SIDES ----------------------//
+
+frontend ve backend i bağlayacağız önce concurrently kuralım (farklı bağlantıları gözetler)
+
+server terminaline  =>    npm install concurrently --save-dev
+server tarafında package.json güncelleyeceğiz     "start": "nodemon server" yerine
+  "scripts": {
+    "server": "nodemon server --ignore client",   //  --ignore client   client tarafta değişiklik yaptığında server ı yeniden başlatma demek (aksi takdirde her değişiklikte server tarafında log görürüz)
+    "client":"npm start --prefix client",
+    "start":"concurrently --kill-others-on-fail \" npm run server\" \" npm run client\""
+  },
+ npm start yazınca iki tarafta çalışacak eğer bir tarafta hata varsa iki tarafta çalışmayacak
+
+
+// --------------COMMUNICATION---THE DIFFERENT LOCALHOSTs--------------//
+
+1. method  "CORS" (Cross-Origin Resource Sharing), kendi server ımızı bağlayabiliriz ve tam url kullanmalıyız "http://localhost:5000/"
+====>  server tarafına cors yükle
+
+PS D:\2.mern-course-jobify-jhonsmilga\jobify-start> npm install cors
+
+server.js de => import cors from "cors"
+                app.use(cors())
+
+ve client tarafta fetch("http://localhost:5000/") ile response yi yakalayabiliriz
+
+
+2. method   "PROXY" (Her yerden erişilebilinir) kendi server ımıza bağlanmak için tam url kullanmaya gerek olmuyor   
+====>  bu projede proxy i tercih edeceğiz 
+DİKKAT==> bunlar development aşaması için projeyi deploy edeceğin zaman  farklı şeyler yapacağız
+
+client tarafta package.json da   proxy ekle
+"proxy":"http://localhost:5000/"                
+ve bu şekilde response ı alıcaz fetch("/api/v1")
+
+fakat server tarafta da ("/") yanına api/v1   i ekleyelim
+
+app.get('/api/v1', (req, res) => {
+  res.json({msg:'API'});
+});
+
+
+
+
+//------  AXIOS   -------- //
+client tarfta terminal aç
+PS D:\2.mern-course-jobify-jhonsmilga\jobify-start\client> npm install axios
+
+
+//------  MORGAN PACKAGE  -------- //
+HTTP request logger middleware for node.js
+Morgan: is another HTTP request logger middleware for Node.js. 
+It simplifies the process of logging requests to your application. 
+You might think of Morgan as a helper that collects logs from your server, such as your request logs. 
+It saves developers time because they don’t have to manually create common logs. 
+It standardizes and automatically creates request logs.
+
+
+server terminalde
+PS D:\2.mern-course-jobify-jhonsmilga\jobify-start> npm install morgan
+
+and import it in server.js
+
+
+if(process.env.NODE_ENV !== "production"){  
+  // terminalde ayrıntılı log bilgisi veriyor. POST /api/v1/auth/register 400 184.136 ms - 30
+  app.use(morgan("dev"))
+}
+
+
+
+// use react icons  "https://react-icons.github.io/react-icons/"
+client tarafa install et
+
+PS D:\2.mern-course-jobify-jhonsmilga\jobify-start\client> npm install react-icons
+
+
+// moment js   tarihi düzenlemek için kullanıyoruz
+client tarafında
+PS D:\2.mern-course-jobify-jhonsmilga\jobify-start\client> npm install
+moment
+
+
+// mockaroo for dummy data     https://www.mockaroo.com/
+ders notlarına bak
+
+//------ populate DB   dummy data yı Mongo db ye yükleyelim ------//
+create popolate.js
+
+import { readFile } from 'fs/promises';
+
+import dotenv from 'dotenv';
+dotenv.config();
+
+import connectDB from './db/connect.js';
+import Job from './models/Job.js';
+
+const start = async () => {
+  try {
+    await connectDB(process.env.MONGO_URL);
+     await Job.deleteMany(); // optional  önceden kaydedilenleri silicez
+
+    const jsonProducts = JSON.parse(
+      await readFile(new URL('./mock-data.json', import.meta.url))
+    );
+    await Job.create(jsonProducts);
+    console.log('Success!!!');
+    process.exit(0);
+  } catch (error) {
+    console.log(error);
+    process.exit(1);
+  }
+};
+
+start();
+
+
+
+PS D:\2.mern-course-jobify-jhonsmilga\jobify-start> node populate
+
+//------ populate DB  ------//
+
+
+
+// moment.js i server tarafınada yükleyelim //
+PS D:\2.mern-course-jobify-jhonsmilga\jobify-start> npm install moment
+
+
+//  recharts library i client tarafa kuracağız (grafikler için) raect 18 de sıkıntı çıkıyorsa --force  ekle
+
+npm install recharts --force
+PS D:\2.mern-course-jobify-jhonsmilga\jobify-start\client> npm install recharts --force
+
+
+
+
+
+// Build Front-End Application  ( sitenin yapımı tamamlandığında yap), heroku ya deploy ederken kullanacağız
+
+
+1. adım   server tarafta json içine fakat client e kurucaz "build-client": "cd client && npm run build",
+
+"scripts": {
+    "build-client": "cd client && npm run build",
+    "server": "nodemon server.js --ignore client",
+    "client": "cd client && npm run start",
+    "start": "concurrently --kill-others-on-fail \"npm run server\" \"npm run client\""
+
+  },
+
+
+terminali çalıştır.
+PS D:\2.mern-course-jobify-jhonsmilga\jobify-start> npm run build-client
+
+
+2. adım  server tarafta değiştir.
+
+server.js;
+
+import { dirname } from 'path';
+import { fileURLToPath } from 'url';
+import path from 'path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+
+// only when ready to deploy
+app.use(express.static(path.resolve(__dirname, './client/build')));
+
+
+
+3.adım  
+
+
+// routes
+app.use('/api/v1/auth', authRouter);
+app.use('/api/v1/jobs', authenticateUser, jobsRouter);
+
+// only when ready to deploy
+app.get('*', function (request, response) {
+  response.sendFile(path.resolve(__dirname, './client/build', 'index.html'));
+});
+
+
+
+
+// sadece server ı çalıştırmak için //
+PS D:\2.mern-course-jobify-jhonsmilga\jobify-start> node server
+
+
+client i çalıştırmak için
+
+http://localhost:5000/
+
+
+
+
+// security packages //
+
+- remove log in the error-handler (error u log yapmaya gerek kalmadı)
+- [helmet](https://www.npmjs.com/package/helmet)
+  Helmet helps you secure your Express apps by setting various HTTP headers.
+- [xss-clean](https://www.npmjs.com/package/xss-clean)
+  Node.js Connect middleware to sanitize user input coming from POST body, GET queries, and url params.
+- [express-mongo-sanitize](https://www.npmjs.com/package/express-mongo-sanitize)
+  Sanitizes user-supplied data to prevent MongoDB Operator Injection.
+- [express-rate-limit](https://www.npmjs.com/package/express-rate-limit)
+  Basic rate-limiting middleware for Express.
+
+
+npm install helmet xss-clean express-mongo-sanitize express-rate-limit
+
+PS D:\2.mern-course-jobify-jhonsmilga\jobify-start>npm install helmet xss-clean express-mongo-sanitize express-rate-limit
+
+server.js;
+
+import helmet from 'helmet';
+import xss from 'xss-clean';
+import mongoSanitize from 'express-mongo-sanitize';
+
+app.use(express.json());
+app.use(helmet());
+app.use(xss());
+app.use(mongoSanitize());
+```
+
+
+
+
+// Limit Requests //
+
+authRoutes.js;
+
+import rateLimiter from 'express-rate-limit';
+
+const apiLimiter = rateLimiter({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  message: 'Too many requests from this IP, please try again after 15 minutes',
+});
+
+router.route('/register').post(apiLimiter, register);
+router.route('/login').post(apiLimiter, login);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
